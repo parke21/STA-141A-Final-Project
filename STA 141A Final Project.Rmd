@@ -1,0 +1,364 @@
+---
+title: "Predictive Modeling: Trial Outcome Based on Mouse Neural Activity"
+author: "Ethan Park 919677184"
+date: '2023-06-06'
+output: html_document
+---
+```{r, echo = FALSE, }
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(class))
+```
+
+## Abstract
+
+Throughout this project, multiple variables (mouse name, date of session, feedback type of trial (failure or success), magnitude of the left screen contrast level,  magnitude of the right screen contrast level, the number of spikes of neurons (collected in a set number of time bins), how long the session lasted, and the brain area in which the spikes occurred) are examined. Patterns are observed, and data is processed through Principal Component Analysis. The data is then formed into a knn predictive model. Conclusions can be made that the process is adequate, but more investigation may be necessary.
+
+## Section 1 Introduction
+
+In a previous experimental research study, test subjects (mice) were placed at a wheel with two screens on the left and right of the mouse, displaying varying contrasts. Data from the neural activity and response from the mice when they are affected by visual stimuli was recorded. This data is stored in RDS files for use. The objective of this project is to observe the given data from the previous research study, determine patterns in the data that could lead to predictive modeling, and create a model that predicts the outcome of a trial given the neural behavior of a test subject and stimuli (contrasts of the left and right). 
+
+## Section 2 Exploratory analysis.
+
+### Data Variable Explanation:
+
+Mouse name:
+
+- Description: Name of test subject
+
+- Data type: char
+
+```{r, echo = FALSE}
+session = list()
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$mouse_name)
+}
+```
+
+Date of session: 
+
+- Description: Date when each session occurred
+
+- Data type: char
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(class(session[[1]]$date_exp))
+}
+```
+
+Feedback type: 
+
+- Description: success or failure of each trial in a session (1 for success, -1 for failure)
+
+- Data type: numeric
+
+- Dimensions: 1 x number of trials
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$feedback_type)
+}
+```
+
+Contrast level left: 
+
+- Description: contrast level of left stimuli (0.00, 0.25, 0.50, or 1.00)
+
+- Data type: numeric
+
+- Dimensions: 1 x number of trials
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[i]]$contrast_left)
+}
+```
+
+Contrast level right: 
+
+- Description: Contrast level of left stimuli (0.00, 0.25, 0.50, or 1.00)
+
+- Data type: numeric
+
+- Dimensions: 1 x number of trials
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$contrast_right)
+}
+```
+
+spks (number of spikes per trial): 
+
+- Description: List of matrices which display the activity of each neuron in a single trial (non-zero values signify strength of neural activity, zero values signify absence of neural activity)
+
+- Data type: list
+
+- Dimensions: list (1 x number of trials) of matrices (number of neurons (rows) x number of time bins (columns))
+
+-- Shown: Matrix 1 from list
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$spks[[1]][1:10, ])
+}
+```
+
+Time: 
+
+- Description: List of lists of 40 time bins for each trial, incremented by .01 seconds, for a total time of .4 seconds per trial. Each trial starts at a different time
+
+- Data type: list
+
+- Dimensions: list (1 x number of trials) of lists (1 x 40 time bins)
+
+-- Shown: list 1 from list
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$time[[1]])
+}
+
+```
+
+Brain area:
+
+- Description: brain area of individual neurons, constant across multiple trials of the same session
+
+- Data type: char
+
+- Dimensions: 1 x number of neurons
+
+-- Shown: brain areas of first 100 neurons
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(session[[1]]$brain_area)
+}
+```
+
+### Session and Trial Comparison: 
+
+```{r, echo = FALSE} 
+# each session
+for (i in 1:18){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  print(cbind("session number" = i, "number of trials" = length(as.numeric(session[[i]]$feedback_type))))
+  # ^prints session number and number of trials in each session
+}
+```
+
+There are a total of 18 sessions in this dataset, each with their independent number of trials.
+
+```{r, echo = FALSE}
+# number of neurons in each trial
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1:5){
+    print(cbind("session number" = i, "trial number" = j, "number of neurons" = length(rowSums(session[[i]]$spks[[j]]))))
+  }
+}
+for (i in 1:18){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1){
+    print(cbind("session number" = i, "trial number" = j, "number of neurons" = length(rowSums(session[[i]]$spks[[j]]))))
+  }
+}
+```
+
+When looking at the way that the neurons are structured in this research study, it is evident that in each trial, the number of neurons are equal. However, we can see that the number of neurons are not equal across the different sessions. For example, when you compare Session 1 Trial 1 to Session 1 Trial 5, they both have 734 neurons, and when you compare Session 1 Trial 1 to Session 2 Trial 1, they have 734 and 1070 neurons, respectively.
+
+### Trial-Specific Neural Activity
+```{r, echo = FALSE}
+# plot matrix with cols as x and rows as y
+# plot multiple trials of same session
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1:10){
+    x_axis <- seq(1, ncol(session[[i]]$spks[[j]]))
+    y_axis <- seq(1, nrow(session[[i]]$spks[[j]]))
+    suppressWarnings(image(x = x_axis, y = y_axis, z = t(session[[i]]$spks[[j]]), xlab = paste("Time (.01-second time bins for .4 seconds) (", ncol(session[[i]]$spks[[j]]), " Columns)", sep = ""), ylab = paste("Neuron Number (", nrow(session[[i]]$spks[[j]]), " Rows)"), sep = "") + title(main = paste("Neural Activity: Session ", i, " Trial ", j, sep = "")))
+    cat("Session ", i, " Trial ", j, " Feedback type: ", session[[i]]$feedback_type[[j]], " Contrast Right: ", session[[i]]$contrast_right[[j]], " Contrast Left: ", session[[i]]$contrast_left[[j]], " \n", sep = "")
+  }
+}
+```
+
+
+### Changes Across Trials
+
+```{r, echo = FALSE}
+for (i in 1){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1){
+    neuron_names <- rownames(session[[i]]$spks[[j]]) <- session[[i]]$brain_area
+    brain_area <- paste(sort(unique(session[[i]]$brain_area)))
+    for (k in 1){
+      single_brain_area <- which(neuron_names == brain_area[k])
+      isolated_matrix <- session[[i]]$spks[[j]]
+        for (l in 1:nrow(session[[i]]$spks[[j]])) {
+          if (!l %in% single_brain_area){
+            isolated_matrix[l, ] <- 0
+          }
+        }
+      # isolated_matrix[!brain_area[k] %in% neuron_names] <- 0
+      x_axis <- seq(1, ncol(session[[i]]$spks[[j]]))
+      y_axis <- seq(1, nrow(session[[i]]$spks[[j]]))
+      image(x = x_axis, y = y_axis, z = t(isolated_matrix), xlab = paste("Time (in increments of .01 seconds for .4 seconds) (", ncol(session[[i]]$spks[[j]]), " Columns)", sep = ""), ylab = paste("Number of Neurons (", nrow(session[[i]]$spks[[j]]), " Rows)", sep = "")) + title(main = paste("Neural Activity: Session ", i, " Trial ", j, ", Brain Area: ", brain_area[k], sep = ""))
+    }
+  }
+}
+```
+
+
+### Homogeneity and Heterogeneity Among Sessions/Mice
+```{r, echo = FALSE}
+# compare success rates of sessions
+# take total number of 1's divided by total number of trials
+for (i in 1:18){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  success_count = 0
+  for (j in 1:length(as.numeric(session[[i]]$feedback_type))){
+    if (as.numeric(session[[i]]$feedback_type[[j]]) == 1){
+      success_count = success_count + 1
+    }
+  }
+  success_rate = sprintf("%.3f", success_count/length(as.numeric(session[[i]]$feedback_type)))
+  print(paste("Success rate of Session ", i, " (", session[[i]]$mouse_name, "): ", success_rate, sep = ""))
+}
+```
+
+Here, we find that across sessions, there is heterogeneity in terms of individual mouse success rate. Specifically, in Session 1, the success rate is .605, and in Session 17, the success rate is .830, which creates a difference of .225. Clearly, this means that we cannot rely on the consistency of the success rates across known sessions to create patterns for new, unknown sessions. 
+
+```{r, echo = FALSE}
+for (i in 1:18){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  neuron_num = nrow(session[[i]]$spks[[1]])
+  print(paste("Number of neurons in Session ", i, " (", session[[i]]$mouse_name, "): ", neuron_num, sep = ""))
+}
+```
+
+In the same way that the success rate is heterogeneous, the quantity of neurons is also heterogeneous. The quantities of the neurons are calculated by determining the number of rows in the spks variable of each session. In Session 16, there are 474 neurons, and in Session 4, there are 1769 neurons, displaying an even greater difference when comparing characteristics of sessions. 
+
+## Section 3 Data integration
+```{r, echo = FALSE}
+# PCA (chapter 8)
+# use prcomp find PC's and adjust each trial using that PC so that it can all be compared in knn
+# brain areas are consistent within multiple trials of the same session
+# across multiple sessions, we know that the trials within each session can predict the brain area
+spks.pca <- session[[1]]$spks[[2]] %>% prcomp(center = TRUE, scale = TRUE)
+plot(spks.pca,type="l")
+```
+
+In order to clean the data, it is processed through Principal Component Analysis. This process results in the evaluation of 4 principal components, denoted by the decrease in the negative slope of the PCA graph. The PCA process centers and scales each value of the data to provide a more accurate representation for modeling.
+
+## Section 4 Predictive modeling
+```{r}
+success_trial_data = data.frame()
+failure_trial_data = data.frame()
+for (i in 10:12){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1:length(session[[i]]$contrast_left)){
+    spks.pca <- prcomp(session[[i]]$spks[[j]], center = TRUE, scale = TRUE)
+    spks.pca_rotated <- spks.pca$rotation[, 4]
+    row = c(value1 = session[[i]]$feedback_type[j], session[[i]]$contrast_left[j], session[[i]]$contrast_right[j], spks.pca_rotated)
+    if (session[[i]]$feedback_type[j] == 1){
+    success_trial_data <- rbind(success_trial_data, row)
+    }
+    if (session[[i]]$feedback_type[j] == -1){
+    failure_trial_data <- rbind(failure_trial_data, row)
+    }
+
+
+  }
+  col_names = c("Feedback Type", "Contrast Left", "Contrast Right", paste0("spks", 1:40))
+  names(success_trial_data) = col_names
+  names(failure_trial_data) = col_names
+}
+
+success_trial_train_data = success_trial_data[1:125, ]
+failure_trial_train_data = failure_trial_data[1:125, ]
+train_data = rbind(success_trial_train_data, failure_trial_train_data)
+success_trial_test_data = success_trial_data[126:170, ]
+failure_trial_test_data = failure_trial_data[126:170, ]
+test_data = rbind(success_trial_test_data, failure_trial_test_data)
+knn_1 <- knn(train = as.matrix(train_data), test = as.matrix(test_data), cl = session[[i]]$feedback_type[1:250], k = 1)
+confusion_matrix_1 <- table(Actual = session[[i]]$feedback_type[1:90], Predicted = knn_1)
+misclassification_rate_1 <- 1 - sum(diag(confusion_matrix_1)) / sum(confusion_matrix_1)
+cat("Misclassification rate: ", misclassification_rate_1, sep = "")
+
+```
+
+The outcome of the knn predictive model is a misclassification rate of .344.
+
+## Section 5 Prediction performance on the test sets
+```{r}
+success_trial_data = data.frame()
+failure_trial_data = data.frame()
+for (i in 10:12){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  for (j in 1:length(session[[i]]$contrast_left)){
+    spks.pca <- prcomp(session[[i]]$spks[[j]], center = TRUE, scale = TRUE)
+    spks.pca_rotated <- spks.pca$rotation[, 4]
+    row = c(value1 = session[[i]]$feedback_type[j], session[[i]]$contrast_left[j], session[[i]]$contrast_right[j], spks.pca_rotated)
+    if (session[[i]]$feedback_type[j] == 1){
+    success_trial_data <- rbind(success_trial_data, row)
+    }
+    if (session[[i]]$feedback_type[j] == -1){
+    failure_trial_data <- rbind(failure_trial_data, row)
+    }
+
+
+  }
+  col_names = c("Feedback Type", "Contrast Left", "Contrast Right", paste0("spks", 1:40))
+  names(success_trial_data) = col_names
+  names(failure_trial_data) = col_names
+}
+test1_data = data.frame()
+test = list()
+for (i in 1){
+  test[[i]]=readRDS(paste('test',i,'.rds',sep=''))
+  for (j in 1:length(test[[i]]$contrast_left)){
+    spks.pca <- prcomp(test[[i]]$spks[[j]], center = TRUE, scale = TRUE)
+    spks.pca_rotated <- spks.pca$rotation[, 4]
+    row = c(value1 = test[[i]]$feedback_type[j], test[[i]]$contrast_left[j], test[[i]]$contrast_right[j], spks.pca_rotated)
+    test1_data <- rbind(test1_data, row)
+  }
+}
+
+success_trial_train_data = success_trial_data[1:50, ]
+failure_trial_train_data = failure_trial_data[1:50, ]
+train_data = rbind(success_trial_train_data, failure_trial_train_data)
+knn_1 <- knn(train = as.matrix(train_data), test = as.matrix(test1_data), cl = test[[1]]$feedback_type[1:100], k = 1)
+confusion_matrix_1 <- table(Actual = test[[1]]$feedback_type[1:100], Predicted = knn_1)
+misclassification_rate_1 <- 1 - sum(diag(confusion_matrix_1)) / sum(confusion_matrix_1)
+cat("Misclassification rate: ", misclassification_rate_1, sep = "")
+```
+
+When used on the test data, the misclassification rate comes out to .4.
+
+## Section 6 Discussion
+
+Although multiple predictive models were not compared in this project, a misclassification rate of .4 allows for conclusion to be had that the predictive model is more reliable than not.
+
+
+## Acknowledgement
+
+STA 141A Dr. Chen's Notes Chapter 8 Reduction, Chapter 6 Prediction, ChatGPT, Steinmetz, N.A., Zatka-Haas, P., Carandini, M. et al. Distributed coding of choice, action and engagement across the mouse brain. Nature 576, 266–273 (2019). https://doi.org/10.1038/s41586-019-1787-x
+
+## Session Info
+```{r, echo = FALSE}
+sessionInfo()
+```
+
+## Index
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
